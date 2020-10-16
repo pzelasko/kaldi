@@ -6,6 +6,7 @@
 import logging
 import re
 import subprocess
+import warnings
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from collections import defaultdict
 from pathlib import Path
@@ -216,7 +217,7 @@ def parse_gp(path: Path, lang: str, romanized=True):
             assert spk_id is not None, f"No speaker ID at line {line}"
             assert utt_id is not None, f"No utterance ID at line {line}"
             # TODO: likely language-dependent text normalization would be adequate before adding transcript to text
-            transcript = remove_special_symbols(line)
+            transcript = remove_special_symbols(line, lang=lang)
             if not transcript:
                 logger.warning(f"Empty utterance {utt_id} in file {p}")
                 continue
@@ -377,15 +378,30 @@ def decompressed(path: Path) -> str:
     return f"shorten -x {path} - | sox -t raw -r 16000 -b 16 -e signed-integer - -t wav - |"
 
 
-ANY_WHITESPACE = re.compile(r"\s", re.UNICODE)
+ANY_WHITESPACE = re.compile(r"\s+", re.UNICODE)
 
 
-def remove_special_symbols(utt: str) -> str:
+def remove_special_symbols(utt: str, lang: str) -> str:
     # Remove begin-of-sentence and end-of-sentence
     # TODO: I don't know why these symbols appear in GP transcripts, we should find that out eventually
-    utt = utt.replace("<s>", "").replace("</s>", "")
+    utt = utt.replace("<s>", "").replace("</s>", "").replace('<silence>', '')
+
     # Remove Unicode fancy whitespaces
     utt = ANY_WHITESPACE.sub(" ", utt)
+
+    if lang == 'Thai':
+        # For Thai, we'll use a DNN model "deepcut" for tokenization
+        try:
+            import deepcut
+            utt = ' '.join(t for t in deepcut.tokenize(utt) if t != ' ')
+        except ImportError:
+            warnings.warn('Cannot import "deepcut" - Thai text will not be tokenized '
+                          '(try: "pip install deepcut" before you run this script)')
+
+    if lang == 'Mandarin':
+        # For Mandarin, we'll just assume character == word (must be sufficient)
+        utt = ' '.join(c for c in utt if c != ' ')
+
     return utt
 
 
